@@ -112,10 +112,10 @@ def load_data() -> Dict[str, Any]:
             "CountyFIPS": metrics["CountyFIPS"].flatten(),  # County identification codes
         }
     except FileNotFoundError:
-        st.error("⚠️ Data file 'CountyLevelMetrics.mat' not found. Please ensure it's in the same directory as this app.")
+        st.error("Data file 'CountyLevelMetrics.mat' not found. Please ensure it is in the same directory as this app.")
         st.stop()
     except Exception as e:
-        st.error(f"⚠️ Error loading data: {str(e)}")
+        st.error(f"Error loading data: {str(e)}")
         st.stop()
 
 # -------------- MAIN APP --------------
@@ -298,8 +298,11 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
     fips = data["CountyFIPS"]
     
     # Create a DataFrame for easier manipulation
+    # Convert FIPS codes to strings with leading zeros (5 digits total)
+    fips_strings = [str(int(fips_code)).zfill(5) for fips_code in fips]
+    
     df = pd.DataFrame({
-        "fips": fips.astype(str).str.zfill(5),  # Ensure FIPS codes are 5 digits with leading zeros
+        "fips": fips_strings,
         "value": values
     })
     
