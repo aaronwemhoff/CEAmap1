@@ -155,6 +155,25 @@ def get_state_fips_codes(state: str) -> list:
     
     return state_fips.get(state, None)
 
+def get_metric_units(metric_option: str) -> str:
+    """
+    Get the appropriate units for display based on the selected metric.
+    
+    Args:
+        metric_option: The selected environmental metric
+    
+    Returns:
+        str: Units for the metric
+    """
+    if metric_option == "carbon footprint":
+        return "kg CO₂-eq/year"
+    elif metric_option == "scope 1 & 2 water footprint":
+        return "L water/year"
+    elif metric_option == "water scarcity footprint":
+        return "L water-eq/year"
+    else:
+        return "units/year"
+
 # -------------- DATA LOADING --------------
 @st.cache_data
 def load_data() -> Dict[str, Any]:
@@ -289,6 +308,10 @@ def main():
                     - 🟢 Green: Bottom 33% (lowest impact)
                     - 🟡 Yellow: Middle 33% (medium impact)  
                     - 🔴 Red: Top 33% (highest impact)
+                    
+                    **Hover Information:**
+                    When you hover over counties, you'll see the calculated environmental
+                    impact for your specific facility in that location.
                 """)
         
         with btn_col2:
@@ -308,6 +331,8 @@ def main():
             # Validate inputs if provided
             power_valid = True
             water_valid = True
+            power_numeric = 0
+            water_numeric = 0
             
             if power_value.strip():
                 power_valid, power_numeric = validate_numeric_input(power_value, "Power consumption")
@@ -317,7 +342,7 @@ def main():
             
             if power_valid and water_valid:
                 # Create the plot
-                create_environmental_map(data, metric_option, state)
+                create_environmental_map(data, metric_option, state, power_numeric, power_unit, water_numeric, water_unit)
                 
                 # Display facility impact if inputs provided
                 if power_value.strip() and water_value.strip():
@@ -342,7 +367,7 @@ def main():
             st.image("https://via.placeholder.com/600x400/E8F4FD/1E88E5?text=Environmental+Impact+Map+Will+Appear+Here", 
                     caption="Your environmental impact map will appear here")
 
-def create_environmental_map(data: Dict[str, Any], metric_option: str, state: str):
+def create_environmental_map(data: Dict[str, Any], metric_option: str, state: str, power_value: float, power_unit: str, water_value: float, water_unit: str):
     """
     Create and display the environmental impact map for the selected state.
     
@@ -350,6 +375,10 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
         data: Dictionary containing the environmental data
         metric_option: Selected environmental metric
         state: Selected state (or "USA" for all)
+        power_value: Power consumption value
+        power_unit: Power consumption unit
+        water_value: Water consumption value
+        water_unit: Water consumption unit
     """
     # Map metric names to data arrays
     metric_map = {
@@ -362,18 +391,41 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
     values = metric_map[metric_option]
     fips = data["CountyFIPS"]
     
+    # Convert power to kWh/year for calculations
+    power_kwh_per_year = convert_power_to_kwh_per_year(power_value, power_unit) if power_value > 0 else 0
+    
     # Create a DataFrame for easier manipulation
     # Convert FIPS codes to strings with leading zeros (5 digits total)
     fips_strings = [str(int(fips_code)).zfill(5) for fips_code in fips]
     
     df = pd.DataFrame({
         "fips": fips_strings,
-        "value": values
+        "emission_factor": values  # This is the factor per kWh
     })
     
     # Remove any invalid values
     df = df.dropna()
-    df = df[df["value"] > 0]  # Remove zero or negative values
+    df = df[df["emission_factor"] > 0]  # Remove zero or negative values
+    
+    # Calculate the actual environmental impact for the facility
+    if power_kwh_per_year > 0:
+        df["calculated_impact"] = df["emission_factor"] * power_kwh_per_year
+        impact_values = df["calculated_impact"]
+        hover_label = f"Facility {metric_option.title()}"
+        hover_units = get_metric_units(metric_option)
+    else:
+        # If no power consumption provided, show the emission factors
+        df["calculated_impact"] = df["emission_factor"]
+        impact_values = df["emission_factor"]
+        hover_label = f"{metric_option.title()} Factor"
+        if metric_option == "carbon footprint":
+            hover_units = "kg CO₂-eq/kWh"
+        elif metric_option == "scope 1 & 2 water footprint":
+            hover_units = "L water/kWh"
+        elif metric_option == "water scarcity footprint":
+            hover_units = "L water-eq/kWh"
+        else:
+            hover_units = "units/kWh"
     
     # Filter data for selected state
     if state != "USA":
@@ -381,14 +433,15 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
         if state_fips_codes:
             # Filter to only include counties from the selected state
             df = df[df["fips"].str[:2].isin(state_fips_codes)]
+            impact_values = df["calculated_impact"]
             
             if df.empty:
                 st.warning(f"No data available for {state}. Please select a different state.")
                 return
     
     # Calculate percentiles for color categories based on filtered data
-    low_percentile = np.percentile(df['value'], 33)
-    high_percentile = np.percentile(df['value'], 66)
+    low_percentile = np.percentile(impact_values, 33)
+    high_percentile = np.percentile(impact_values, 66)
     
     # Create color categories
     def categorize_value(val):
@@ -399,8 +452,14 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
         else:
             return "High Impact"
     
-    df["category"] = df["value"].apply(categorize_value)
-    df["formatted_value"] = df["value"].round(4)  # Round for display
+    df["category"] = df["calculated_impact"].apply(categorize_value)
+    df["formatted_impact"] = df["calculated_impact"].round(4)  # Round for display
+    
+    # Create custom hover text
+    df["hover_text"] = df.apply(lambda row: 
+        f"FIPS: {row['fips']}<br>" +
+        f"{hover_label}: {row['formatted_impact']:.4f} {hover_units}<br>" +
+        f"Impact Level: {row['category']}", axis=1)
     
     # Create the choropleth map
     fig = px.choropleth(
@@ -414,9 +473,17 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
             "High Impact": "#DC143C"       # Crimson
         },
         scope="usa",
-        labels={"category": "Impact Level", "formatted_value": f"{metric_option.title()}"},
-        title=f"{metric_option.title()} by County - {state}",
-        hover_data=["formatted_value"]
+        labels={"category": "Impact Level"},
+        title=f"{metric_option.title()} by County - {state}" + 
+              (f" (Based on {power_kwh_per_year:,.0f} kWh/year)" if power_kwh_per_year > 0 else " (Emission Factors)"),
+        hover_name="hover_text",
+        hover_data={}  # Clear default hover data since we're using custom hover_name
+    )
+    
+    # Update hover template to show only our custom text
+    fig.update_traces(
+        hovertemplate="%{hovertext}<extra></extra>",
+        hovertext=df["hover_text"]
     )
     
     # If a specific state is selected, zoom to that state
@@ -497,6 +564,12 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
     # Show statistics
     st.subheader(f"📊 Statistics for {state}")
     
+    # Display appropriate statistics based on whether facility data was provided
+    if power_kwh_per_year > 0:
+        impact_range_text = f"({impact_values.min():.2f} - {impact_values.max():.2f} {hover_units})"
+    else:
+        impact_range_text = f"({impact_values.min():.4f} - {impact_values.max():.4f} {hover_units})"
+    
     stat_col1, stat_col2, stat_col3 = st.columns(3)
     
     with stat_col1:
@@ -519,6 +592,12 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
             f"{len(df[df['category'] == 'High Impact'])} counties",
             f"> {high_percentile:.4f}"
         )
+    
+    # Additional information about the data being displayed
+    if power_kwh_per_year > 0:
+        st.info(f"📌 **Note**: The map shows calculated {metric_option} values for your facility consuming {power_kwh_per_year:,.0f} kWh/year. Hover over counties to see specific impact values.")
+    else:
+        st.info(f"📌 **Note**: The map shows emission factors per kWh. Enter your facility's power consumption to see calculated environmental impacts.")
 
 def calculate_facility_impact(power_value: float, power_unit: str, water_value: float, water_unit: str, metric_option: str):
     """
@@ -556,9 +635,11 @@ def calculate_facility_impact(power_value: float, power_unit: str, water_value: 
     
     # Note about impact calculations
     st.info("""
-        💡 **Note**: To calculate your facility's total environmental impact, 
-        multiply your annual power consumption by the county-specific factor 
-        shown in the map above for your facility's location.
+        💡 **How to Use the Map**: 
+        - The map now shows your facility's calculated environmental impact for each county
+        - Hover over any county to see the specific impact value for your facility in that location
+        - Colors represent relative impact levels: Green (lowest 33%), Yellow (middle 33%), Red (highest 33%)
+        - Choose locations with green counties to minimize your environmental impact
     """)
 
 # -------------- RUN THE APP --------------
