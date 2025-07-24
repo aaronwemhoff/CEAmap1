@@ -570,11 +570,18 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
     # Show statistics
     st.subheader(f"📊 Statistics for {state}")
     
+    # Function to format statistics values based on metric type
+    def format_stat_value(value, metric):
+        if metric == "carbon footprint":
+            return f"{value:.2e}"  # Scientific notation with 2 decimal places
+        else:
+            return f"{value:.4f}"  # Regular formatting for other metrics
+    
     # Display appropriate statistics based on whether facility data was provided
     if power_kwh_per_year > 0:
-        impact_range_text = f"({impact_values.min():.2f} - {impact_values.max():.2f} {hover_units})"
+        impact_range_text = f"({format_stat_value(impact_values.min(), metric_option)} - {format_stat_value(impact_values.max(), metric_option)} {hover_units})"
     else:
-        impact_range_text = f"({impact_values.min():.4f} - {impact_values.max():.4f} {hover_units})"
+        impact_range_text = f"({format_stat_value(impact_values.min(), metric_option)} - {format_stat_value(impact_values.max(), metric_option)} {hover_units})"
     
     stat_col1, stat_col2, stat_col3 = st.columns(3)
     
@@ -582,21 +589,21 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
         st.metric(
             "Low Impact Counties",
             f"{len(df[df['category'] == 'Low Impact'])} counties",
-            f"≤ {low_percentile:.4f}"
+            f"≤ {format_stat_value(low_percentile, metric_option)}"
         )
     
     with stat_col2:
         st.metric(
             "Medium Impact Counties",
             f"{len(df[df['category'] == 'Medium Impact'])} counties",
-            f"{low_percentile:.4f} - {high_percentile:.4f}"
+            f"{format_stat_value(low_percentile, metric_option)} - {format_stat_value(high_percentile, metric_option)}"
         )
     
     with stat_col3:
         st.metric(
             "High Impact Counties",
             f"{len(df[df['category'] == 'High Impact'])} counties",
-            f"> {high_percentile:.4f}"
+            f"> {format_stat_value(high_percentile, metric_option)}"
         )
     
     # Additional information about the data being displayed
