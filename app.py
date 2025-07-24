@@ -578,10 +578,7 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
             return f"{value:.4f}"  # Regular formatting for other metrics
     
     # Display appropriate statistics based on whether facility data was provided
-    if power_kwh_per_year > 0:
-        impact_range_text = f"({format_stat_value(impact_values.min(), metric_option)} - {format_stat_value(impact_values.max(), metric_option)} {hover_units})"
-    else:
-        impact_range_text = f"({format_stat_value(impact_values.min(), metric_option)} - {format_stat_value(impact_values.max(), metric_option)} {hover_units})"
+    impact_range_text = f"({format_stat_value(impact_values.min(), metric_option)} - {format_stat_value(impact_values.max(), metric_option)} {hover_units})"
     
     stat_col1, stat_col2, stat_col3 = st.columns(3)
     
