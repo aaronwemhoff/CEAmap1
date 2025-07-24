@@ -437,13 +437,13 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
                 return
     
     # Use the calculated_impact column consistently for both percentile calculation and categorization
-    impact_values = df["calculated_impact"]
+    impact_values = df["calculated_impact"].values  # Convert to numpy array to ensure consistency
     
     # Calculate percentiles for color categories based on the filtered calculated_impact values
-    low_percentile = np.percentile(impact_values, 33)
-    high_percentile = np.percentile(impact_values, 66)
+    low_percentile = np.percentile(impact_values, 33.333333)  # Use more precise percentile
+    high_percentile = np.percentile(impact_values, 66.666667)  # Use more precise percentile
     
-    # Create color categories based on the same impact_values used for percentile calculation
+    # Create color categories - ensuring we use the DataFrame column directly
     def categorize_value(val):
         if val <= low_percentile:
             return "Low Impact"
@@ -452,8 +452,20 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
         else:
             return "High Impact"
     
-    df["category"] = impact_values.apply(categorize_value)
-    df["formatted_impact"] = impact_values.round(4)  # Round for display
+    # Apply categorization to each row explicitly
+    df["category"] = df["calculated_impact"].apply(categorize_value)
+    df["formatted_impact"] = df["calculated_impact"].round(4)  # Round for display
+    
+    # Debug: Let's add some information for troubleshooting
+    # Check if FIPS 13091 exists and what its values are
+    if "13091" in df["fips"].values:
+        fips_13091_row = df[df["fips"] == "13091"].iloc[0]
+        print(f"DEBUG - FIPS 13091: Impact={fips_13091_row['calculated_impact']:.6f}, Category={fips_13091_row['category']}")
+        print(f"DEBUG - Percentiles: Low={low_percentile:.6f}, High={high_percentile:.6f}")
+        print(f"DEBUG - Total counties: {len(df)}")
+        print(f"DEBUG - Low count: {len(df[df['category'] == 'Low Impact'])}")
+        print(f"DEBUG - Medium count: {len(df[df['category'] == 'Medium Impact'])}")
+        print(f"DEBUG - High count: {len(df[df['category'] == 'High Impact'])}")
     
     # Create custom hover text with scientific notation for carbon footprint
     def format_hover_value(value, metric):
@@ -606,6 +618,12 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
     # Additional information about the data being displayed
     if power_kwh_per_year > 0:
         st.info(f"📌 **Note**: The map shows calculated {metric_option} values for your facility consuming {power_kwh_per_year:,.0f} kWh/year. Hover over counties to see specific impact values.")
+        
+        # Debug information for FIPS 13091 if it exists
+        if "13091" in df["fips"].values:
+            fips_13091_row = df[df["fips"] == "13091"].iloc[0]
+            st.write(f"**Debug Info for FIPS 13091**: Impact = {fips_13091_row['calculated_impact']:.6f}, Category = {fips_13091_row['category']}")
+            st.write(f"**Percentile Thresholds**: Low ≤ {low_percentile:.6f}, Medium = {low_percentile:.6f} to {high_percentile:.6f}, High > {high_percentile:.6f}")
     else:
         st.info(f"📌 **Note**: The map shows emission factors per kWh. Enter your facility's power consumption to see calculated environmental impacts.")
 
