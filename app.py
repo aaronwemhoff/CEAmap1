@@ -410,13 +410,11 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
     # Calculate the actual environmental impact for the facility
     if power_kwh_per_year > 0:
         df["calculated_impact"] = df["emission_factor"] * power_kwh_per_year
-        impact_values = df["calculated_impact"]
         hover_label = f"Facility {metric_option.title()}"
         hover_units = get_metric_units(metric_option)
     else:
         # If no power consumption provided, show the emission factors
         df["calculated_impact"] = df["emission_factor"]
-        impact_values = df["emission_factor"]
         hover_label = f"{metric_option.title()} Factor"
         if metric_option == "carbon footprint":
             hover_units = "kg CO₂-eq/kWh"
@@ -433,17 +431,19 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
         if state_fips_codes:
             # Filter to only include counties from the selected state
             df = df[df["fips"].str[:2].isin(state_fips_codes)]
-            impact_values = df["calculated_impact"]
             
             if df.empty:
                 st.warning(f"No data available for {state}. Please select a different state.")
                 return
     
-    # Calculate percentiles for color categories based on filtered data
+    # Use the calculated_impact column consistently for both percentile calculation and categorization
+    impact_values = df["calculated_impact"]
+    
+    # Calculate percentiles for color categories based on the filtered calculated_impact values
     low_percentile = np.percentile(impact_values, 33)
     high_percentile = np.percentile(impact_values, 66)
     
-    # Create color categories
+    # Create color categories based on the same impact_values used for percentile calculation
     def categorize_value(val):
         if val <= low_percentile:
             return "Low Impact"
@@ -452,8 +452,8 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
         else:
             return "High Impact"
     
-    df["category"] = df["calculated_impact"].apply(categorize_value)
-    df["formatted_impact"] = df["calculated_impact"].round(4)  # Round for display
+    df["category"] = impact_values.apply(categorize_value)
+    df["formatted_impact"] = impact_values.round(4)  # Round for display
     
     # Create custom hover text with scientific notation for carbon footprint
     def format_hover_value(value, metric):
