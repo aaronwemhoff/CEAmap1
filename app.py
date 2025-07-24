@@ -455,10 +455,16 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
     df["category"] = df["calculated_impact"].apply(categorize_value)
     df["formatted_impact"] = df["calculated_impact"].round(4)  # Round for display
     
-    # Create custom hover text
+    # Create custom hover text with scientific notation for carbon footprint
+    def format_hover_value(value, metric):
+        if metric == "carbon footprint":
+            return f"{value:.2e}"  # Scientific notation with 2 decimal places
+        else:
+            return f"{value:.4f}"  # Regular formatting for other metrics
+    
     df["hover_text"] = df.apply(lambda row: 
         f"FIPS: {row['fips']}<br>" +
-        f"{hover_label}: {row['formatted_impact']:.4f} {hover_units}<br>" +
+        f"{hover_label}: {format_hover_value(row['calculated_impact'], metric_option)} {hover_units}<br>" +
         f"Impact Level: {row['category']}", axis=1)
     
     # Create the choropleth map
