@@ -1,4 +1,4 @@
-# app.py - Environmental Impact Explorer
+# app.py - Facility Environmental Impact Explorer
 # A beginner-friendly Streamlit app for visualizing environmental impacts
 
 import streamlit as st
@@ -13,7 +13,7 @@ from typing import Dict, Any
 # -------------- CONFIGURATION --------------
 # Set up the page configuration (this should be the first Streamlit command)
 st.set_page_config(
-    page_title="Environmental Impact Explorer",
+    page_title="Facility Environmental Impact Explorer",
     page_icon="🌍",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -90,6 +90,71 @@ def validate_numeric_input(value: str, field_name: str) -> tuple[bool, float]:
         st.error(f"{field_name} must be a valid number")
         return False, 0.0
 
+def get_state_fips_codes(state: str) -> list:
+    """
+    Get FIPS codes for counties in a specific state.
+    
+    Args:
+        state: State name or "USA" for all continental US
+    
+    Returns:
+        list: FIPS codes for the state (first 2 digits)
+    """
+    state_fips = {
+        "USA": None,  # Special case for all continental US
+        "Alabama": ["01"],
+        "Alaska": ["02"],
+        "Arizona": ["04"],
+        "Arkansas": ["05"],
+        "California": ["06"],
+        "Colorado": ["08"],
+        "Connecticut": ["09"],
+        "Delaware": ["10"],
+        "Florida": ["12"],
+        "Georgia": ["13"],
+        "Idaho": ["16"],
+        "Illinois": ["17"],
+        "Indiana": ["18"],
+        "Iowa": ["19"],
+        "Kansas": ["20"],
+        "Kentucky": ["21"],
+        "Louisiana": ["22"],
+        "Maine": ["23"],
+        "Maryland": ["24"],
+        "Massachusetts": ["25"],
+        "Michigan": ["26"],
+        "Minnesota": ["27"],
+        "Mississippi": ["28"],
+        "Missouri": ["29"],
+        "Montana": ["30"],
+        "Nebraska": ["31"],
+        "Nevada": ["32"],
+        "New Hampshire": ["33"],
+        "New Jersey": ["34"],
+        "New Mexico": ["35"],
+        "New York": ["36"],
+        "North Carolina": ["37"],
+        "North Dakota": ["38"],
+        "Ohio": ["39"],
+        "Oklahoma": ["40"],
+        "Oregon": ["41"],
+        "Pennsylvania": ["42"],
+        "Rhode Island": ["44"],
+        "South Carolina": ["45"],
+        "South Dakota": ["46"],
+        "Tennessee": ["47"],
+        "Texas": ["48"],
+        "Utah": ["49"],
+        "Vermont": ["50"],
+        "Virginia": ["51"],
+        "Washington": ["53"],
+        "West Virginia": ["54"],
+        "Wisconsin": ["55"],
+        "Wyoming": ["56"]
+    }
+    
+    return state_fips.get(state, None)
+
 # -------------- DATA LOADING --------------
 @st.cache_data
 def load_data() -> Dict[str, Any]:
@@ -126,7 +191,7 @@ def main():
     data = load_data()
     
     # App title and description
-    st.title("🌍 Environmental Impact Explorer")
+    st.title("🌍 Facility Environmental Impact Explorer")
     st.markdown("*Visualize county-level environmental impacts across the United States*")
     
     # Create two columns for better layout
@@ -207,8 +272,8 @@ def main():
                 st.info("""
                     **About This Tool**
                     
-                    This application helps estimate environmental impacts by visualizing 
-                    county-level data for selected U.S. states.
+                    The Facility Environmental Impact Explorer helps estimate environmental 
+                    impacts by visualizing county-level data for selected U.S. states.
                     
                     **Available Metrics:**
                     - **Carbon footprint**: kg CO₂ equivalent per kWh
@@ -233,7 +298,7 @@ def main():
         with btn_col3:
             # (7) Exit button
             if st.button("🚪 Exit", use_container_width=True):
-                st.warning("👋 Thank you for using the Environmental Impact Explorer!")
+                st.warning("👋 Thank you for using the Facility Environmental Impact Explorer!")
                 st.balloons()
                 st.stop()
     
@@ -279,7 +344,7 @@ def main():
 
 def create_environmental_map(data: Dict[str, Any], metric_option: str, state: str):
     """
-    Create and display the environmental impact map.
+    Create and display the environmental impact map for the selected state.
     
     Args:
         data: Dictionary containing the environmental data
@@ -310,7 +375,18 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
     df = df.dropna()
     df = df[df["value"] > 0]  # Remove zero or negative values
     
-    # Calculate percentiles for color categories
+    # Filter data for selected state
+    if state != "USA":
+        state_fips_codes = get_state_fips_codes(state)
+        if state_fips_codes:
+            # Filter to only include counties from the selected state
+            df = df[df["fips"].str[:2].isin(state_fips_codes)]
+            
+            if df.empty:
+                st.warning(f"No data available for {state}. Please select a different state.")
+                return
+    
+    # Calculate percentiles for color categories based on filtered data
     low_percentile = np.percentile(df['value'], 33)
     high_percentile = np.percentile(df['value'], 66)
     
@@ -339,9 +415,73 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
         },
         scope="usa",
         labels={"category": "Impact Level", "formatted_value": f"{metric_option.title()}"},
-        title=f"{metric_option.title()} by County",
+        title=f"{metric_option.title()} by County - {state}",
         hover_data=["formatted_value"]
     )
+    
+    # If a specific state is selected, zoom to that state
+    if state != "USA":
+        # Set the geographic focus to the selected state
+        state_centers = {
+            "Alabama": {"lat": 32.806671, "lon": -86.791130},
+            "Alaska": {"lat": 61.370716, "lon": -152.404419},
+            "Arizona": {"lat": 33.729759, "lon": -111.431221},
+            "Arkansas": {"lat": 34.969704, "lon": -92.373123},
+            "California": {"lat": 36.116203, "lon": -119.681564},
+            "Colorado": {"lat": 39.059811, "lon": -105.311104},
+            "Connecticut": {"lat": 41.597782, "lon": -72.755371},
+            "Delaware": {"lat": 39.318523, "lon": -75.507141},
+            "Florida": {"lat": 27.766279, "lon": -81.686783},
+            "Georgia": {"lat": 33.040619, "lon": -83.643074},
+            "Idaho": {"lat": 44.240459, "lon": -114.478828},
+            "Illinois": {"lat": 40.349457, "lon": -88.986137},
+            "Indiana": {"lat": 39.849426, "lon": -86.258278},
+            "Iowa": {"lat": 42.011539, "lon": -93.210526},
+            "Kansas": {"lat": 38.526600, "lon": -96.726486},
+            "Kentucky": {"lat": 37.668140, "lon": -84.670067},
+            "Louisiana": {"lat": 31.169546, "lon": -91.867805},
+            "Maine": {"lat": 44.693947, "lon": -69.381927},
+            "Maryland": {"lat": 39.063946, "lon": -76.802101},
+            "Massachusetts": {"lat": 42.230171, "lon": -71.530106},
+            "Michigan": {"lat": 43.326618, "lon": -84.536095},
+            "Minnesota": {"lat": 45.694454, "lon": -93.900192},
+            "Mississippi": {"lat": 32.741646, "lon": -89.678696},
+            "Missouri": {"lat": 38.456085, "lon": -92.288368},
+            "Montana": {"lat": 47.040182, "lon": -109.633837},
+            "Nebraska": {"lat": 41.125370, "lon": -98.268082},
+            "Nevada": {"lat": 38.313515, "lon": -117.055374},
+            "New Hampshire": {"lat": 43.452492, "lon": -71.563896},
+            "New Jersey": {"lat": 40.298904, "lon": -74.756138},
+            "New Mexico": {"lat": 34.840515, "lon": -106.248482},
+            "New York": {"lat": 42.165726, "lon": -74.948051},
+            "North Carolina": {"lat": 35.630066, "lon": -79.806419},
+            "North Dakota": {"lat": 47.528912, "lon": -99.784012},
+            "Ohio": {"lat": 40.388783, "lon": -82.764915},
+            "Oklahoma": {"lat": 35.565342, "lon": -96.928917},
+            "Oregon": {"lat": 44.572021, "lon": -122.070938},
+            "Pennsylvania": {"lat": 40.590752, "lon": -77.209755},
+            "Rhode Island": {"lat": 41.680893, "lon": -71.511780},
+            "South Carolina": {"lat": 33.856892, "lon": -80.945007},
+            "South Dakota": {"lat": 44.299782, "lon": -99.438828},
+            "Tennessee": {"lat": 35.747845, "lon": -86.692345},
+            "Texas": {"lat": 31.054487, "lon": -97.563461},
+            "Utah": {"lat": 40.150032, "lon": -111.862434},
+            "Vermont": {"lat": 44.045876, "lon": -72.710686},
+            "Virginia": {"lat": 37.769337, "lon": -78.169968},
+            "Washington": {"lat": 47.400902, "lon": -121.490494},
+            "West Virginia": {"lat": 38.491226, "lon": -80.954570},
+            "Wisconsin": {"lat": 44.268543, "lon": -89.616508},
+            "Wyoming": {"lat": 42.755966, "lon": -107.302490}
+        }
+        
+        if state in state_centers:
+            center = state_centers[state]
+            fig.update_layout(
+                geo=dict(
+                    center=dict(lat=center["lat"], lon=center["lon"]),
+                    projection_scale=6  # Zoom in on the state
+                )
+            )
     
     # Customize the map appearance
     fig.update_layout(
@@ -355,7 +495,7 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
     st.plotly_chart(fig, use_container_width=True)
     
     # Show statistics
-    st.subheader("📊 Statistics")
+    st.subheader(f"📊 Statistics for {state}")
     
     stat_col1, stat_col2, stat_col3 = st.columns(3)
     
