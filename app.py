@@ -396,16 +396,313 @@ def create_environmental_map(data: Dict[str, Any], metric_option: str, state: st
     
     # Create a DataFrame for easier manipulation
     # Convert FIPS codes to strings with leading zeros (5 digits total)
-    fips_strings = [str(int(fips_code)).zfill(5) for fips_code in fips]
+    # Handle potential NaN values and ensure proper formatting
+    fips_strings = []
+    for fips_code in fips:
+        if pd.isna(fips_code) or fips_code == 0:
+            continue  # Skip invalid FIPS codes
+        try:
+            # Convert to int first to handle any floating point issues, then format as 5-digit string
+            fips_int = int(float(fips_code))
+            fips_str = f"{fips_int:05d}"  # Ensure 5 digits with leading zeros
+            fips_strings.append(fips_str)
+        except (ValueError, OverflowError):
+            continue  # Skip invalid FIPS codes
+    
+    # Create arrays of the same length as valid FIPS codes
+    valid_indices = []
+    valid_fips = []
+    valid_values = []
+    
+    for i, fips_code in enumerate(fips):
+        if pd.isna(fips_code) or fips_code == 0:
+            continue
+        try:
+            fips_int = int(float(fips_code))
+            fips_str = f"{fips_int:05d}"
+            valid_indices.append(i)
+            valid_fips.append(fips_str)
+            valid_values.append(values[i])
+        except (ValueError, OverflowError):
+            continue
     
     df = pd.DataFrame({
-        "fips": fips_strings,
-        "emission_factor": values  # This is the factor per kWh
+        "fips": valid_fips,
+        "emission_factor": valid_values  # This is the factor per kWh
     })
     
-    # Remove any invalid values
+    # Remove any remaining invalid values after DataFrame creation
     df = df.dropna()
     df = df[df["emission_factor"] > 0]  # Remove zero or negative values
+    df = df[df["fips"].str.len() == 5]  # Ensure FIPS codes are exactly 5 digits
+    df = df[df["fips"].str.match(r'^\d{5}
+    
+    # Calculate the actual environmental impact for the facility
+    if power_kwh_per_year > 0:
+        df["calculated_impact"] = df["emission_factor"] * power_kwh_per_year
+        hover_label = f"Facility {metric_option.title()}"
+        hover_units = get_metric_units(metric_option)
+    else:
+        # If no power consumption provided, show the emission factors
+        df["calculated_impact"] = df["emission_factor"]
+        hover_label = f"{metric_option.title()} Factor"
+        if metric_option == "carbon footprint":
+            hover_units = "kg CO₂-eq/kWh"
+        elif metric_option == "scope 1 & 2 water footprint":
+            hover_units = "L water/kWh"
+        elif metric_option == "water scarcity footprint":
+            hover_units = "L water-eq/kWh"
+        else:
+            hover_units = "units/kWh"
+    
+    # Filter data for selected state
+    if state != "USA":
+        state_fips_codes = get_state_fips_codes(state)
+        if state_fips_codes:
+            # Filter to only include counties from the selected state
+            df = df[df["fips"].str[:2].isin(state_fips_codes)]
+            
+            if df.empty:
+                st.warning(f"No data available for {state}. Please select a different state.")
+                return
+    
+    # Use the calculated_impact column consistently for both percentile calculation and categorization
+    impact_values = df["calculated_impact"].values  # Convert to numpy array to ensure consistency
+    
+    # Calculate percentiles for color categories based on the filtered calculated_impact values
+    low_percentile = np.percentile(impact_values, 33.333333)  # Use more precise percentile
+    high_percentile = np.percentile(impact_values, 66.666667)  # Use more precise percentile
+    
+    # Create color categories - ensuring we use the DataFrame column directly
+    def categorize_value(val):
+        if val <= low_percentile:
+            return "Low Impact"
+        elif val <= high_percentile:
+            return "Medium Impact"
+        else:
+            return "High Impact"
+    
+    # Apply categorization to each row explicitly
+    df["category"] = df["calculated_impact"].apply(categorize_value)
+    df["formatted_impact"] = df["calculated_impact"].round(4)  # Round for display
+    
+    # Debug: Let's add some information for troubleshooting
+    # Check if FIPS 13091 exists and what its values are
+    if "13091" in df["fips"].values:
+        fips_13091_row = df[df["fips"] == "13091"].iloc[0]
+        print(f"DEBUG - FIPS 13091: Impact={fips_13091_row['calculated_impact']:.6f}, Category={fips_13091_row['category']}")
+        print(f"DEBUG - Percentiles: Low={low_percentile:.6f}, High={high_percentile:.6f}")
+        print(f"DEBUG - Total counties: {len(df)}")
+        print(f"DEBUG - Low count: {len(df[df['category'] == 'Low Impact'])}")
+        print(f"DEBUG - Medium count: {len(df[df['category'] == 'Medium Impact'])}")
+        print(f"DEBUG - High count: {len(df[df['category'] == 'High Impact'])}")
+    
+    # Create custom hover text with scientific notation for carbon footprint
+    def format_hover_value(value, metric):
+        if metric == "carbon footprint":
+            return f"{value:.2e}"  # Scientific notation with 2 decimal places
+        else:
+            return f"{value:.4f}"  # Regular formatting for other metrics
+    
+    df["hover_text"] = df.apply(lambda row: 
+        f"FIPS: {row['fips']}<br>" +
+        f"{hover_label}: {format_hover_value(row['calculated_impact'], metric_option)} {hover_units}<br>" +
+        f"Impact Level: {row['category']}", axis=1)
+    
+    # Create the choropleth map
+    fig = px.choropleth(
+        df,
+        geojson="https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json",
+        locations="fips",
+        color="category",
+        color_discrete_map={
+            "Low Impact": "#2E8B57",      # Sea Green
+            "Medium Impact": "#FFD700",    # Gold
+            "High Impact": "#DC143C"       # Crimson
+        },
+        scope="usa",
+        labels={"category": "Impact Level"},
+        title=f"{metric_option.title()} by County - {state}" + 
+              (f" (Based on {power_kwh_per_year:,.0f} kWh/year)" if power_kwh_per_year > 0 else " (Emission Factors)"),
+        hover_name="hover_text",
+        hover_data={}  # Clear default hover data since we're using custom hover_name
+    )
+    
+    # Update hover template to show only our custom text
+    fig.update_traces(
+        hovertemplate="%{hovertext}<extra></extra>",
+        hovertext=df["hover_text"]
+    )
+    
+    # If a specific state is selected, zoom to that state
+    if state != "USA":
+        # Set the geographic focus to the selected state
+        state_centers = {
+            "Alabama": {"lat": 32.806671, "lon": -86.791130},
+            "Alaska": {"lat": 61.370716, "lon": -152.404419},
+            "Arizona": {"lat": 33.729759, "lon": -111.431221},
+            "Arkansas": {"lat": 34.969704, "lon": -92.373123},
+            "California": {"lat": 36.116203, "lon": -119.681564},
+            "Colorado": {"lat": 39.059811, "lon": -105.311104},
+            "Connecticut": {"lat": 41.597782, "lon": -72.755371},
+            "Delaware": {"lat": 39.318523, "lon": -75.507141},
+            "Florida": {"lat": 27.766279, "lon": -81.686783},
+            "Georgia": {"lat": 33.040619, "lon": -83.643074},
+            "Idaho": {"lat": 44.240459, "lon": -114.478828},
+            "Illinois": {"lat": 40.349457, "lon": -88.986137},
+            "Indiana": {"lat": 39.849426, "lon": -86.258278},
+            "Iowa": {"lat": 42.011539, "lon": -93.210526},
+            "Kansas": {"lat": 38.526600, "lon": -96.726486},
+            "Kentucky": {"lat": 37.668140, "lon": -84.670067},
+            "Louisiana": {"lat": 31.169546, "lon": -91.867805},
+            "Maine": {"lat": 44.693947, "lon": -69.381927},
+            "Maryland": {"lat": 39.063946, "lon": -76.802101},
+            "Massachusetts": {"lat": 42.230171, "lon": -71.530106},
+            "Michigan": {"lat": 43.326618, "lon": -84.536095},
+            "Minnesota": {"lat": 45.694454, "lon": -93.900192},
+            "Mississippi": {"lat": 32.741646, "lon": -89.678696},
+            "Missouri": {"lat": 38.456085, "lon": -92.288368},
+            "Montana": {"lat": 47.040182, "lon": -109.633837},
+            "Nebraska": {"lat": 41.125370, "lon": -98.268082},
+            "Nevada": {"lat": 38.313515, "lon": -117.055374},
+            "New Hampshire": {"lat": 43.452492, "lon": -71.563896},
+            "New Jersey": {"lat": 40.298904, "lon": -74.756138},
+            "New Mexico": {"lat": 34.840515, "lon": -106.248482},
+            "New York": {"lat": 42.165726, "lon": -74.948051},
+            "North Carolina": {"lat": 35.630066, "lon": -79.806419},
+            "North Dakota": {"lat": 47.528912, "lon": -99.784012},
+            "Ohio": {"lat": 40.388783, "lon": -82.764915},
+            "Oklahoma": {"lat": 35.565342, "lon": -96.928917},
+            "Oregon": {"lat": 44.572021, "lon": -122.070938},
+            "Pennsylvania": {"lat": 40.590752, "lon": -77.209755},
+            "Rhode Island": {"lat": 41.680893, "lon": -71.511780},
+            "South Carolina": {"lat": 33.856892, "lon": -80.945007},
+            "South Dakota": {"lat": 44.299782, "lon": -99.438828},
+            "Tennessee": {"lat": 35.747845, "lon": -86.692345},
+            "Texas": {"lat": 31.054487, "lon": -97.563461},
+            "Utah": {"lat": 40.150032, "lon": -111.862434},
+            "Vermont": {"lat": 44.045876, "lon": -72.710686},
+            "Virginia": {"lat": 37.769337, "lon": -78.169968},
+            "Washington": {"lat": 47.400902, "lon": -121.490494},
+            "West Virginia": {"lat": 38.491226, "lon": -80.954570},
+            "Wisconsin": {"lat": 44.268543, "lon": -89.616508},
+            "Wyoming": {"lat": 42.755966, "lon": -107.302490}
+        }
+        
+        if state in state_centers:
+            center = state_centers[state]
+            fig.update_layout(
+                geo=dict(
+                    center=dict(lat=center["lat"], lon=center["lon"]),
+                    projection_scale=6  # Zoom in on the state
+                )
+            )
+    
+    # Customize the map appearance
+    fig.update_layout(
+        title_font_size=20,
+        title_x=0.5,
+        height=600,
+        margin=dict(l=0, r=0, t=50, b=0)
+    )
+    
+    # Display the map
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Show statistics
+    st.subheader(f"📊 Statistics for {state}")
+    
+    # Function to format statistics values based on metric type
+    def format_stat_value(value, metric):
+        if metric == "carbon footprint":
+            return f"{value:.2e}"  # Scientific notation with 2 decimal places
+        else:
+            return f"{value:.4f}"  # Regular formatting for other metrics
+    
+    # Display appropriate statistics based on whether facility data was provided
+    impact_range_text = f"({format_stat_value(impact_values.min(), metric_option)} - {format_stat_value(impact_values.max(), metric_option)} {hover_units})"
+    
+    stat_col1, stat_col2, stat_col3 = st.columns(3)
+    
+    with stat_col1:
+        st.metric(
+            "Low Impact Counties",
+            f"{len(df[df['category'] == 'Low Impact'])} counties",
+            f"≤ {format_stat_value(low_percentile, metric_option)}"
+        )
+    
+    with stat_col2:
+        st.metric(
+            "Medium Impact Counties",
+            f"{len(df[df['category'] == 'Medium Impact'])} counties",
+            f"{format_stat_value(low_percentile, metric_option)} - {format_stat_value(high_percentile, metric_option)}"
+        )
+    
+    with stat_col3:
+        st.metric(
+            "High Impact Counties",
+            f"{len(df[df['category'] == 'High Impact'])} counties",
+            f"> {format_stat_value(high_percentile, metric_option)}"
+        )
+    
+    # Additional information about the data being displayed
+    if power_kwh_per_year > 0:
+        st.info(f"📌 **Note**: The map shows calculated {metric_option} values for your facility consuming {power_kwh_per_year:,.0f} kWh/year. Hover over counties to see specific impact values.")
+        
+        # Debug information for FIPS 13091 if it exists
+        if "13091" in df["fips"].values:
+            fips_13091_row = df[df["fips"] == "13091"].iloc[0]
+            st.write(f"**Debug Info for FIPS 13091**: Impact = {fips_13091_row['calculated_impact']:.6f}, Category = {fips_13091_row['category']}")
+            st.write(f"**Percentile Thresholds**: Low ≤ {low_percentile:.6f}, Medium = {low_percentile:.6f} to {high_percentile:.6f}, High > {high_percentile:.6f}")
+    else:
+        st.info(f"📌 **Note**: The map shows emission factors per kWh. Enter your facility's power consumption to see calculated environmental impacts.")
+
+def calculate_facility_impact(power_value: float, power_unit: str, water_value: float, water_unit: str, metric_option: str):
+    """
+    Calculate and display the environmental impact of the user's facility.
+    
+    Args:
+        power_value: Power consumption value
+        power_unit: Power consumption unit
+        water_value: Water consumption value
+        water_unit: Water consumption unit
+        metric_option: Selected environmental metric
+    """
+    # Convert to standard units
+    power_kwh_per_year = convert_power_to_kwh_per_year(power_value, power_unit)
+    water_liters_per_year = convert_water_to_liters_per_year(water_value, water_unit)
+    
+    st.subheader("🏭 Your Facility's Impact")
+    
+    # Display converted values
+    impact_col1, impact_col2 = st.columns(2)
+    
+    with impact_col1:
+        st.metric(
+            "Annual Power Consumption",
+            f"{power_kwh_per_year:,.0f} kWh/year",
+            f"From {power_value} {power_unit}"
+        )
+    
+    with impact_col2:
+        st.metric(
+            "Annual Water Consumption",
+            f"{water_liters_per_year:,.0f} L/year",
+            f"From {water_value} {water_unit}"
+        )
+    
+    # Note about impact calculations
+    st.info("""
+        💡 **How to Use the Map**: 
+        - The map now shows your facility's calculated environmental impact for each county
+        - Hover over any county to see the specific impact value for your facility in that location
+        - Colors represent relative impact levels: Green (lowest 33%), Yellow (middle 33%), Red (highest 33%)
+        - Choose locations with green counties to minimize your environmental impact
+    """)
+
+# -------------- RUN THE APP --------------
+if __name__ == "__main__":
+    main())]  # Ensure FIPS codes contain only digits
     
     # Calculate the actual environmental impact for the facility
     if power_kwh_per_year > 0:
